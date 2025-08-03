@@ -1,0 +1,12 @@
+agno
+psycopg2-binary
+sqlalchemy
+pgvector
+python-dotenv
+openai
+azure-identity
+pypdf
+duckduckgo-search
+exa-py
+slack-sdk
+yfinance 
