@@ -22,40 +22,16 @@ def get_azure_model():
         api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     )
 
-# Function to extract max_events from user request
-def extract_max_events(user_request: str) -> int:
-    """
-    Extract max_events parameter from user request.
-    Looks for patterns like:
-    - "Find 3 events"
-    - "Get 5 meetups"
-    - "max_events: 2"
-    - "Show me 10 events"
-    """
-    import re
+# Input Pydantic Model
+class EventSearchRequest(BaseModel):
+    """Structured event search request with specific requirements"""
     
-    # More comprehensive patterns to catch various formats
-    patterns = [
-        # "Find X events" patterns - more flexible
-        r'find\s+(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-        r'get\s+(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-        r'show\s+me\s+(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-        r'search\s+for\s+(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-        r'extract\s+(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-        # Explicit max_events patterns
-        r'max_events?:\s*(\d+)',
-        r'max\s+events?:\s*(\d+)',
-        # Generic number followed by events (more flexible)
-        r'(\d+)\s+(?:professional\s+)?(?:tech\s+)?(?:social\s+)?(?:events?|meetups?|parties?)',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, user_request.lower())
-        if match:
-            return int(match.group(1))
-    
-    # Default to 1 if no max_events found
-    return 1
+    location: str = Field(description="City or location to search for events")
+    event_type: str = Field(description="Type of events to search for (e.g., 'tech', 'social', 'professional', 'parties')")
+    date_range: str = Field(description="When to search for events (e.g., 'this weekend', 'next month', 'upcoming')")
+    max_events: int = Field(description="Number of events to find", default=1)
+    platform_preference: Optional[str] = Field(description="Preferred platform (e.g., 'Eventbrite', 'Meetup', 'LinkedIn', 'Facebook')", default=None)
+    category: Optional[str] = Field(description="Specific category or industry focus", default=None)
 
 # Structured Output Models
 class EventDetails(BaseModel):
@@ -74,6 +50,18 @@ class EventSearchAnalysis(BaseModel):
     events_found: int
     events: List[EventDetails]
     platform_summary: str
+
+
+# Function to convert Pydantic model to string message for team compatibility
+def convert_request_to_message(request: EventSearchRequest) -> str:
+    """
+    Convert EventSearchRequest Pydantic model to a string message for the team.
+    This is needed because the team routing mechanism doesn't handle Pydantic models directly.
+    """
+    platform_pref = request.platform_preference or "none"
+    category = request.category or "none"
+    
+    return f"Find {request.max_events} {request.event_type} events in {request.location} for {request.date_range}. Platform preference: {platform_pref}. Category: {category}."
 
 
 # Event Platform Agents
@@ -108,6 +96,16 @@ eventbrite_agent = Agent(
         "3. Look for event aggregator websites that list Eventbrite events",
         "4. Search for venue websites that link to Eventbrite tickets",
         "",
+        "Max Events Parameter Guidelines:",
+        "1. Use the max_events value from the structured input",
+        "2. Extract exactly that many events",
+        "3. Prioritize events that are:",
+        "   - Closest to the requested date",
+        "   - Best match for the requested location",
+        "   - Most relevant to the requested category/type",
+        "   - Have good reviews or high attendance",
+        "4. Return the specified number of events with complete details",
+        "",
         "Time Criteria Guidelines:",
         "1. ALWAYS prioritize recent and upcoming events:",
         "   - For 'this weekend': Look for events in the next 3-7 days",
@@ -122,18 +120,6 @@ eventbrite_agent = Agent(
         "   - Add '2025' or current year to searches",
         "   - Use 'upcoming' or 'next' in search terms",
         "   - Include 'recent' or 'latest' when appropriate",
-        "",
-        "Max Events Parameter Guidelines:",
-        "1. Look for max_events in the user request (e.g., 'max_events: 3' or 'Find 3 events')",
-        "2. If max_events is specified, extract exactly that many events",
-        "3. If max_events is not specified, default to 1 event",
-        "4. Do NOT ask for user input - use the max_events value from the request",
-        "5. Prioritize events that are:",
-        "   - Closest to the requested date",
-        "   - Best match for the requested location",
-        "   - Most relevant to the requested category/type",
-        "   - Have good reviews or high attendance",
-        "6. Return the specified number of events with complete details",
         "",
         "IMPORTANT: Use multiple search strategies and simplify search terms to find more results.",
     ],
@@ -173,6 +159,17 @@ meetup_agent = Agent(
         "3. Look for local event calendars that list Meetup events",
         "4. Search for community websites that promote local meetups",
         "",
+        "Max Events Parameter Guidelines:",
+        "1. Use the max_events value from the structured input",
+        "2. Extract exactly that many events",
+        "3. Prioritize meetups that are:",
+        "   - Closest to the requested date",
+        "   - Best match for the requested location",
+        "   - Most relevant to the requested topic/interest",
+        "   - Have active groups with good member counts",
+        "   - Free or low-cost events",
+        "4. Return the specified number of events with complete details",
+        "",
         "Time Criteria Guidelines:",
         "1. ALWAYS prioritize recent and upcoming events:",
         "   - For 'this weekend': Look for events in the next 3-7 days",
@@ -187,19 +184,6 @@ meetup_agent = Agent(
         "   - Add '2025' or current year to searches",
         "   - Use 'upcoming' or 'next' in search terms",
         "   - Include 'recent' or 'latest' when appropriate",
-        "",
-        "Max Events Parameter Guidelines:",
-        "1. Look for max_events in the user request (e.g., 'max_events: 3' or 'Find 3 meetups')",
-        "2. If max_events is specified, extract exactly that many events",
-        "3. If max_events is not specified, default to 1 event",
-        "4. Do NOT ask for user input - use the max_events value from the request",
-        "5. Prioritize meetups that are:",
-        "   - Closest to the requested date",
-        "   - Best match for the requested location",
-        "   - Most relevant to the requested topic/interest",
-        "   - Have active groups with good member counts",
-        "   - Free or low-cost events",
-        "6. Return the specified number of events with complete details",
         "",
         "IMPORTANT: Use multiple search strategies and simplify search terms to find more results.",
     ],
@@ -238,6 +222,16 @@ linkedin_events_agent = Agent(
         "3. Look for professional event aggregator websites",
         "4. Search for industry-specific event calendars and professional organizations",
         "",
+        "Max Events Parameter Guidelines:",
+        "1. Use the max_events value from the structured input",
+        "2. Extract exactly that many events",
+        "3. Prioritize events that are:",
+        "   - Most relevant to professional development and business networking",
+        "   - Have credible speakers and host organizations",
+        "   - Offer valuable networking opportunities",
+        "   - Match the requested industry/topic",
+        "4. Return the specified number of events with complete details",
+        "",
         "Time Criteria Guidelines:",
         "1. ALWAYS prioritize recent and upcoming events:",
         "   - For 'this weekend': Look for events in the next 3-7 days",
@@ -252,18 +246,6 @@ linkedin_events_agent = Agent(
         "   - Add '2025' or current year to searches",
         "   - Use 'upcoming' or 'next' in search terms",
         "   - Include 'recent' or 'latest' when appropriate",
-        "",
-        "Max Events Parameter Guidelines:",
-        "1. Look for max_events in the user request (e.g., 'max_events: 2' or 'Find 2 events')",
-        "2. If max_events is specified, extract exactly that many events",
-        "3. If max_events is not specified, default to 1 event",
-        "4. Do NOT ask for user input - use the max_events value from the request",
-        "5. Prioritize events that are:",
-        "   - Most relevant to professional development and business networking",
-        "   - Have credible speakers and host organizations",
-        "   - Offer valuable networking opportunities",
-        "   - Match the requested industry/topic",
-        "6. Return the specified number of events with complete details",
         "",
         "IMPORTANT: Use multiple search strategies and simplify search terms to find more results.",
     ],
@@ -300,6 +282,16 @@ facebook_events_agent = Agent(
         "2. Look for event aggregator websites and local event calendars",
         "3. Search for venue websites and event organizers",
         "",
+        "Max Events Parameter Guidelines:",
+        "1. Use the max_events value from the structured input",
+        "2. Extract exactly that many events",
+        "3. Prioritize events that are:",
+        "   - Most popular with high engagement",
+        "   - Match the requested social category",
+        "   - Have good venue information",
+        "   - Closest to requested date/location",
+        "4. Return the specified number of events with complete details",
+        "",
         "Time Criteria Guidelines:",
         "1. ALWAYS prioritize recent and upcoming events:",
         "   - For 'this weekend': Look for events in the next 3-7 days",
@@ -314,18 +306,6 @@ facebook_events_agent = Agent(
         "   - Add '2025' or current year to searches",
         "   - Use 'upcoming' or 'next' in search terms",
         "   - Include 'recent' or 'latest' when appropriate",
-        "",
-        "Max Events Parameter Guidelines:",
-        "1. Look for max_events in the user request (e.g., 'max_events: 3' or 'Find 3 events')",
-        "2. If max_events is specified, extract exactly that many events",
-        "3. If max_events is not specified, default to 1 event",
-        "4. Do NOT ask for user input - use the max_events value from the request",
-        "5. Prioritize events that are:",
-        "   - Most popular with high engagement",
-        "   - Match the requested social category",
-        "   - Have good venue information",
-        "   - Closest to requested date/location",
-        "6. Return the specified number of events with complete details",
         "",
         "IMPORTANT: Use multiple search strategies to find actual events. Don't give up after one search.",
     ],
@@ -365,6 +345,16 @@ general_events_agent = Agent(
         "4. Search for venue websites, local newspapers, and community calendars",
         "5. Check for city/town official event calendars and tourism websites",
         "",
+        "Max Events Parameter Guidelines:",
+        "1. Use the max_events value from the structured input",
+        "2. Extract exactly that many events",
+        "3. Prioritize events that are:",
+        "   - Most relevant to the request",
+        "   - From reputable sources",
+        "   - Have complete information available",
+        "   - Match requested criteria",
+        "4. Return the specified number of events with complete details",
+        "",
         "Time Criteria Guidelines:",
         "1. ALWAYS prioritize recent and upcoming events:",
         "   - For 'this weekend': Look for events in the next 3-7 days",
@@ -379,18 +369,6 @@ general_events_agent = Agent(
         "   - Add '2025' or current year to searches",
         "   - Use 'upcoming' or 'next' in search terms",
         "   - Include 'recent' or 'latest' when appropriate",
-        "",
-        "Max Events Parameter Guidelines:",
-        "1. Look for max_events in the user request (e.g., 'max_events: 3' or 'Find 3 events')",
-        "2. If max_events is specified, extract exactly that many events",
-        "3. If max_events is not specified, default to 1 event",
-        "4. Do NOT ask for user input - use the max_events value from the request",
-        "5. Prioritize events that are:",
-        "   - Most relevant to the request",
-        "   - From reputable sources",
-        "   - Have complete information available",
-        "   - Match requested criteria",
-        "6. Return the specified number of events with complete details",
         "",
         "IMPORTANT: Use multiple search strategies and simplify search terms to find more results.",
     ],
@@ -407,7 +385,7 @@ event_scraping_team = Team(
     instructions=[
         "You are the Event Scraping Team Leader, responsible for routing event search requests to the most appropriate specialized agent.",
         "Key Responsibilities:", 
-        "1. Analyze user requests to determine the best single platform for event search",
+        "1. Analyze structured event search requests to determine the best single platform for event search",
         "2. Route each request to exactly one specialized agent based on:",
         "   - Platform preference (Eventbrite, Meetup, LinkedIn, Facebook, etc.)",
         "   - Event type (professional, social, community, etc.)",
@@ -435,6 +413,9 @@ event_scraping_team = Team(
         "   - General event discovery needed",
         "   - Multiple types of events requested",
         "",
+        "IMPORTANT: When you receive a structured input (Pydantic model), extract the information and create a clear text message for routing.",
+        "Format the message as: 'Find [max_events] [event_type] events in [location] for [date_range]. Platform preference: [platform_preference]. Category: [category].'",
+        "",
         "Always route to exactly one agent that best matches the request. Provide clear reasoning for your routing decision.",
     ],
     members=[
@@ -450,72 +431,68 @@ event_scraping_team = Team(
     show_members_responses=True,
 )
 
-# Test the event scraping team with max_events parameter extraction
+# Test the event scraping team with Pydantic model input
 if __name__ == "__main__":
-    # Test different types of event searches
-    print("=== Testing Event Scraping Team with Max Events Parameter ===\n")
+    print("=== Testing Event Scraping Team with Pydantic Model Input ===\n")
     
-    # # Test 1: Professional LinkedIn event search with max_events=2
-    # test_message1 = "Find 2 professional tech events on LinkedIn in San Francisco for next month"
-    # max_events1 = extract_max_events(test_message1)
-    # print(f"1. Searching for {max_events1} professional LinkedIn events in San Francisco...")
-    # print(f"   Extracted max_events: {max_events1}")
-    # print(f"   Original message: '{test_message1}'")
+    # # Test 1: Professional LinkedIn event search
+    # test_request1 = EventSearchRequest(
+    #     location="San Francisco",
+    #     event_type="professional tech",
+    #     date_range="next month",
+    #     max_events=2,
+    #     platform_preference="LinkedIn",
+    #     category="technology"
+    # )
     
-    # # Pass the extracted max_events in the message
-    # enhanced_message1 = f"{test_message1} [max_events: {max_events1}]"
-    # result = event_scraping_team.run(message=enhanced_message1)
+    # print(f"1. Searching for {test_request1.max_events} professional LinkedIn events in {test_request1.location}...")
+    # print(f"   Request: {test_request1.model_dump_json(indent=2)}")
     
-
+    # # Convert Pydantic model to string for team compatibility
+    # message_text1 = convert_request_to_message(test_request1)
+    # print(f"   Converted message: {message_text1}")
     
-    # # Print raw JSON output from the model
-    # import json
-    # print("\n=== RAW JSON OUTPUT ===")
-    # if hasattr(result.content, 'model_dump'):
-    #     # Structured output
-    #     print(json.dumps(result.content.model_dump(), indent=2, ensure_ascii=False))
-    # else:
-    #     # String output - print as is
-    #     print("String Response:")
-    #     print(result.content)
-    
-    print("\n" + "="*80 + "\n")
-    
-    # Test 2: Social event search with max_events=3
-    test_message2 = "Find 3 social events and parties in New York this weekend"
-    max_events2 = extract_max_events(test_message2)
-    print(f"\n2. Searching for {max_events2} social events in New York...")
-    print(f"   Extracted max_events: {max_events2}")
-    print(f"   Original message: '{test_message2}'")
-    
-    enhanced_message2 = f"{test_message2} [max_events: {max_events2}]"
-    result2 = event_scraping_team.run(message=enhanced_message2)
-    
-    
-    print("\n=== RAW JSON OUTPUT ===")
-    if hasattr(result2.content, 'model_dump'):
-        print(json.dumps(result2.content.model_dump(), indent=2, ensure_ascii=False))
-    else:
-        print("String Response:")
-        print(result2.content)
+    # # Use print_response with string message
+    # event_scraping_team.print_response(message=message_text1)
     
     # print("\n" + "="*80 + "\n")
     
-    # # Test 3: Default behavior when no max_events specified
-    # test_message3 = "Find tech meetups in Austin"
-    # max_events3 = extract_max_events(test_message3)
-    # print(f"3. Searching for events with default max_events={max_events3}...")
-    # print(f"   Extracted max_events: {max_events3}")
-    # print(f"   Original message: '{test_message3}'")
+    # # Test 2: Social event search
+    # test_request2 = EventSearchRequest(
+    #     location="New York",
+    #     event_type="social parties",
+    #     date_range="this weekend",
+    #     max_events=3,
+    #     platform_preference="Facebook",
+    #     category="entertainment"
+    # )
     
+    # print(f"2. Searching for {test_request2.max_events} social events in {test_request2.location}...")
+    # print(f"   Request: {test_request2.model_dump_json(indent=2)}")
     
-    # enhanced_message3 = f"{test_message3} [max_events: {max_events3}]"
-    # result3 = event_scraping_team.run(message=enhanced_message3)
+    # # Convert Pydantic model to string for team compatibility
+    # message_text2 = convert_request_to_message(test_request2)
+    # print(f"   Converted message: {message_text2}")
     
+    # # Use print_response with string message
+    # event_scraping_team.print_response(message=message_text2)
     
-    # print("\n=== RAW JSON OUTPUT ===")
-    # if hasattr(result3.content, 'model_dump'):
-    #     print(json.dumps(result3.content.model_dump(), indent=2, ensure_ascii=False))
-    # else:
-    #     print("String Response:")
-    #     print(result3.content)
+    # print("\n" + "="*80 + "\n")
+    
+    # Test 3: General event search with default max_events
+    test_request3 = EventSearchRequest(
+        location="Austin",
+        event_type="tech meetups",
+        date_range="upcoming",
+        category="technology"
+    )
+    
+    print(f"3. Searching for events with default max_events={test_request3.max_events}...")
+    print(f"   Request: {test_request3.model_dump_json(indent=2)}")
+    
+    # Convert Pydantic model to string for team compatibility
+    message_text = convert_request_to_message(test_request3)
+    print(f"   Converted message: {message_text}")
+    
+    # Use print_response with string message
+    event_scraping_team.print_response(message=message_text) 
