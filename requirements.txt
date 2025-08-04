@@ -1,4 +1,4 @@
-agno
+agno[ddg,website,pandas,csv,file,calculator,email,yfinance,duckdb]
 psycopg2-binary
 sqlalchemy
 pgvector
@@ -6,7 +6,13 @@ python-dotenv
 openai
 azure-identity
 pypdf
-duckduckgo-search
+ddgs
 exa-py
 slack-sdk
-yfinance 
+yfinance
+pandas
+requests
+beautifulsoup4
+lxml
+newspaper4k
+duckdb 
